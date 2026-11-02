@@ -1,0 +1,6 @@
+{
+  "name": "SyncBeat - YouTube Metronome",
+  "description": "유튜브 음악과 완벽히 동기화되는 스마트 메트로놈 연습기. BPM 감지, 재생 속도 연동, 비트 오프셋 미세조정, 탭 템포 및 루프 구간 연습 지원.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

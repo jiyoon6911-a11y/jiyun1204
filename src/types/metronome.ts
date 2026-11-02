@@ -10,8 +10,6 @@ export type Subdivision = 1 | 2 | 3 | 4; // 1 = Quarter, 2 = 8th, 3 = Triplet, 4
 
 export type PickupType = 'none' | '1_beat' | '2_beat' | '3_beat' | 'half_beat' | 'custom';
 
-export type CountdownMode = 'off' | '1_bar' | '2_bars' | '3_sec';
-
 export interface PracticePreset {
   id: string;
   title: string;

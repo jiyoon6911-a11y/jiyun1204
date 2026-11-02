@@ -13,7 +13,7 @@ import {
   Sliders,
   Sparkles,
 } from 'lucide-react';
-import { TimeSignature, Subdivision, CountdownMode } from '../types/metronome';
+import { TimeSignature, Subdivision } from '../types/metronome';
 
 interface MetronomeControllerProps {
   bpm: number;
@@ -32,8 +32,8 @@ interface MetronomeControllerProps {
   isMetronomeMuted: boolean;
   onToggleMetronomeMute: () => void;
   onTapDownbeat: () => void;
-  countdownMode: CountdownMode;
-  onCountdownModeChange: (mode: CountdownMode) => void;
+  countIn: boolean;
+  onToggleCountIn: () => void;
 }
 
 const COMMON_SPEEDS = [0.5, 0.75, 0.85, 1.0, 1.1, 1.25, 1.5, 2.0];
@@ -63,8 +63,8 @@ export const MetronomeController: React.FC<MetronomeControllerProps> = ({
   isMetronomeMuted,
   onToggleMetronomeMute,
   onTapDownbeat,
-  countdownMode,
-  onCountdownModeChange,
+  countIn,
+  onToggleCountIn,
 }) => {
   // Tap tempo state
   const tapTimesRef = useRef<number[]>([]);
@@ -133,13 +133,11 @@ export const MetronomeController: React.FC<MetronomeControllerProps> = ({
               <>
                 <Pause className="w-4 h-4 fill-current" />
                 <span>일시정지</span>
-                <span className="text-[10px] bg-neutral-950/20 px-1.5 py-0.5 rounded text-neutral-900 font-mono hidden sm:inline">Space</span>
               </>
             ) : (
               <>
                 <Play className="w-4 h-4 fill-current ml-0.5" />
                 <span>재생 & 싱크 시작</span>
-                <span className="text-[10px] bg-neutral-900/20 px-1.5 py-0.5 rounded text-neutral-700 font-mono hidden sm:inline">Space</span>
               </>
             )}
           </button>
@@ -153,33 +151,18 @@ export const MetronomeController: React.FC<MetronomeControllerProps> = ({
           </button>
         </div>
 
-        {/* Metronome Sound Mute & Preparation Countdown Mode */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Countdown Selector */}
-          <div className="flex items-center gap-1 p-0.5 bg-neutral-900 rounded-lg border border-neutral-800 text-xs">
-            <span className="text-[11px] text-neutral-400 px-1.5 font-medium hidden sm:inline">
-              준비 카운트:
-            </span>
-            {[
-              { mode: 'off' as CountdownMode, label: '끔' },
-              { mode: '1_bar' as CountdownMode, label: '1마디 (4박)' },
-              { mode: '2_bars' as CountdownMode, label: '2마디 (8박)' },
-              { mode: '3_sec' as CountdownMode, label: '3초' },
-            ].map((item) => (
-              <button
-                key={item.mode}
-                onClick={() => onCountdownModeChange(item.mode)}
-                className={`px-2.5 py-1 rounded text-xs transition-colors cursor-pointer ${
-                  countdownMode === item.mode
-                    ? 'bg-amber-400 text-neutral-950 font-bold shadow-sm'
-                    : 'text-neutral-400 hover:text-white'
-                }`}
-                title={`재생 버튼 클릭 후 악기 준비를 위한 ${item.label} 카운트다운`}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
+        {/* Metronome Sound Mute and Count-in */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onToggleCountIn}
+            className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors cursor-pointer ${
+              countIn
+                ? 'bg-amber-500/10 border-amber-500/40 text-amber-300'
+                : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-neutral-200'
+            }`}
+          >
+            <span>예비박 (1마디 카운트)</span>
+          </button>
 
           <button
             onClick={onToggleMetronomeMute}

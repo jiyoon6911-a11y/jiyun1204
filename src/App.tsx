@@ -8,14 +8,12 @@ import { PracticeLoopBar } from './components/PracticeLoopBar';
 import { SongAudioSyncPanel } from './components/SongAudioSyncPanel';
 import { AudioSettingsModal } from './components/AudioSettingsModal';
 import { PresetLibraryModal } from './components/PresetLibraryModal';
-import { CountdownOverlay } from './components/CountdownOverlay';
 import {
   SongConfig,
   SoundType,
   LoopSettings,
   Subdivision,
   SongAnalysisResult,
-  CountdownMode,
 } from './types/metronome';
 import { PRACTICE_PRESETS } from './constants/presets';
 import { audioEngine } from './utils/audioEngine';
@@ -45,13 +43,7 @@ export default function App() {
     defaultPreset.timeSignature
   );
   const [subdivision, setSubdivision] = useState<Subdivision>(1);
-
-  // Preparation Countdown (예비 카운트다운)
-  const [countdownMode, setCountdownMode] = useState<CountdownMode>('1_bar');
-  const [isCountingDown, setIsCountingDown] = useState<boolean>(false);
-  const [countdownCurrent, setCountdownCurrent] = useState<number>(1);
-  const [countdownTotal, setCountdownTotal] = useState<number>(4);
-  const [isGo, setIsGo] = useState<boolean>(false);
+  const [countIn, setCountIn] = useState<boolean>(false);
 
   // Audio start & Pickup beat (못갖춘마디 / 예비박)
   const [songStartTimeSec, setSongStartTimeSec] = useState<number>(
@@ -72,6 +64,8 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
+  const [isCountingIn, setIsCountingIn] = useState<boolean>(false);
+  const [countInBeat, setCountInBeat] = useState<number>(1);
 
   // Real-time Beat & Phase state
   const [currentBeat, setCurrentBeat] = useState<number>(1);
@@ -102,8 +96,6 @@ export default function App() {
   const ytControlsRef = useRef<YouTubeControls | null>(null);
   const lastScheduledIndexRef = useRef<number>(-1);
   const lastSubIndexRef = useRef<number>(-1);
-  const countIntervalRef = useRef<number | null>(null);
-  const goTimeoutRef = useRef<number | null>(null);
 
   // Load saved state on mount
   useEffect(() => {
@@ -125,7 +117,6 @@ export default function App() {
         if (last.songStartTimeSec !== undefined) setSongStartTimeSec(last.songStartTimeSec);
         if (last.pickupBeats !== undefined) setPickupBeats(last.pickupBeats);
         if (last.muteBeforeStart !== undefined) setMuteBeforeStart(last.muteBeforeStart);
-        if (last.countdownMode !== undefined) setCountdownMode(last.countdownMode);
       }
     } catch {
       // ignore
@@ -146,7 +137,6 @@ export default function App() {
         songStartTimeSec,
         pickupBeats,
         muteBeforeStart,
-        countdownMode,
       };
       localStorage.setItem(STORAGE_LAST_CONFIG_KEY, JSON.stringify(config));
     } catch {
@@ -163,7 +153,6 @@ export default function App() {
     songStartTimeSec,
     pickupBeats,
     muteBeforeStart,
-    countdownMode,
   ]);
 
   // Audio Engine parameter sync
@@ -182,14 +171,6 @@ export default function App() {
   useEffect(() => {
     audioEngine.setPan(pan);
   }, [pan]);
-
-  // Cleanup timers on unmount
-  useEffect(() => {
-    return () => {
-      if (countIntervalRef.current) clearInterval(countIntervalRef.current);
-      if (goTimeoutRef.current) clearTimeout(goTimeoutRef.current);
-    };
-  }, []);
 
   // High-precision beat calculator taking into account audio start time and pickup beats
   const handleTimeUpdate = useCallback(
@@ -240,6 +221,7 @@ export default function App() {
           const pickupBeatIndex = Math.floor(pickupElapsed);
           phaseInBeat = pickupElapsed - pickupBeatIndex;
 
+          // e.g. In 4/4 with 1 pickup beat: enters on beat 4
           beatNumber = timeSignature.beats - pickupBeats + 1 + pickupBeatIndex;
           isAccent = false;
           schedulingKey = -1000 + pickupBeatIndex;
@@ -273,6 +255,7 @@ export default function App() {
 
       // Trigger Web Audio synthesis clicks
       if (schedulingKey !== lastScheduledIndexRef.current) {
+        // Only click if forward progression (not huge backward seeks)
         if (
           lastScheduledIndexRef.current === -1 ||
           Math.abs(schedulingKey - lastScheduledIndexRef.current) < 4
@@ -301,130 +284,51 @@ export default function App() {
     ]
   );
 
-  // Cancel any running countdown
-  const handleCancelCountdown = () => {
-    if (countIntervalRef.current) clearInterval(countIntervalRef.current);
-    if (goTimeoutRef.current) clearTimeout(goTimeoutRef.current);
-    setIsCountingDown(false);
-    setIsGo(false);
-  };
-
-  // Launch countdown then trigger playback
-  const startCountdown = () => {
-    if (countIntervalRef.current) clearInterval(countIntervalRef.current);
-    if (goTimeoutRef.current) clearTimeout(goTimeoutRef.current);
-
-    setIsCountingDown(true);
-    setIsGo(false);
-
-    const effectiveBpm = bpm * speed;
-    let total = 4;
-    let intervalMs = (60 / effectiveBpm) * 1000;
-
-    if (countdownMode === '1_bar') {
-      total = timeSignature.beats;
-      intervalMs = (60 / effectiveBpm) * 1000;
-    } else if (countdownMode === '2_bars') {
-      total = timeSignature.beats * 2;
-      intervalMs = (60 / effectiveBpm) * 1000;
-    } else if (countdownMode === '3_sec') {
-      total = 3;
-      intervalMs = 1000;
-    }
-
-    setCountdownTotal(total);
-    setCountdownCurrent(1);
-
-    // Initial click for count 1
-    audioEngine.playClick(undefined, true, false);
-
-    let count = 1;
-    countIntervalRef.current = window.setInterval(() => {
-      count++;
-      if (count <= total) {
-        setCountdownCurrent(count);
-        // Accent on beat 1 of each bar
-        const isAccent =
-          countdownMode === '2_bars'
-            ? count === 1 || count === timeSignature.beats + 1
-            : count === 1;
-        audioEngine.playClick(undefined, isAccent, false);
-      } else {
-        if (countIntervalRef.current) clearInterval(countIntervalRef.current);
-        setIsGo(true);
-        audioEngine.playClick(undefined, true, false);
-
-        // Start YouTube video right on cue
-        if (ytControlsRef.current) {
-          ytControlsRef.current.play();
-        }
-
-        goTimeoutRef.current = window.setTimeout(() => {
-          setIsCountingDown(false);
-          setIsGo(false);
-        }, 350);
-      }
-    }, intervalMs);
-  };
-
-  // Play / Pause Master Toggle
+  // Play / Pause Master
   const handleTogglePlay = () => {
-    if (isCountingDown) {
-      handleCancelCountdown();
-      return;
-    }
-
     if (isPlaying) {
       if (ytControlsRef.current) {
         ytControlsRef.current.pause();
       }
       setIsPlaying(false);
+      setIsCountingIn(false);
     } else {
-      if (countdownMode === 'off') {
+      if (countIn) {
+        setIsCountingIn(true);
+        let count = 1;
+        setCountInBeat(1);
+        const beatMs = (60 / (bpm * speed)) * 1000;
+
+        audioEngine.playClick(undefined, true, false);
+
+        const countInterval = window.setInterval(() => {
+          count++;
+          if (count <= timeSignature.beats) {
+            setCountInBeat(count);
+            audioEngine.playClick(undefined, false, false);
+          } else {
+            clearInterval(countInterval);
+            setIsCountingIn(false);
+            if (ytControlsRef.current) {
+              ytControlsRef.current.play();
+            }
+          }
+        }, beatMs);
+      } else {
         if (ytControlsRef.current) {
           ytControlsRef.current.play();
         }
-      } else {
-        startCountdown();
       }
     }
   };
 
-  // Spacebar and Esc keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      const isInput =
-        target?.tagName === 'INPUT' ||
-        target?.tagName === 'TEXTAREA' ||
-        target?.isContentEditable;
-      if (isInput) return;
-
-      if (e.code === 'Space') {
-        e.preventDefault();
-        handleTogglePlay();
-      } else if (e.code === 'Escape' && isCountingDown) {
-        e.preventDefault();
-        handleCancelCountdown();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isPlaying, isCountingDown, countdownMode, bpm, speed, timeSignature]);
-
   const handleRestart = () => {
-    handleCancelCountdown();
     lastScheduledIndexRef.current = -1;
     lastSubIndexRef.current = -1;
     const start = loopSettings.enabled ? loopSettings.startTime : 0;
     if (ytControlsRef.current) {
       ytControlsRef.current.seekTo(start);
-      if (countdownMode === 'off') {
-        ytControlsRef.current.play();
-      } else {
-        startCountdown();
-      }
+      ytControlsRef.current.play();
     }
   };
 
@@ -444,6 +348,7 @@ export default function App() {
     const beatPeriodSec = 60 / effectiveBpm;
 
     if (pickupBeats > 0) {
+      // Current playhead is the downbeat (Beat 1)
       const newAudioStart = Math.max(0, currentTime - pickupBeats * beatPeriodSec);
       setSongStartTimeSec(Math.round(newAudioStart * 100) / 100);
       setOffsetMs(0);
@@ -495,7 +400,6 @@ export default function App() {
     pickupBeats?: number;
     audioStartSec?: number;
   }) => {
-    handleCancelCountdown();
     setYoutubeId(preset.youtubeId);
     setYoutubeUrl(preset.youtubeUrl);
     setSongTitle(preset.title);
@@ -520,8 +424,8 @@ export default function App() {
       offsetMs,
       timeSignature,
       subdivision,
-      countIn: countdownMode !== 'off',
-      countInBars: countdownMode === '2_bars' ? 2 : 1,
+      countIn,
+      countInBars: 1,
       songStartTimeSec,
       pickupBeats,
       muteBeforeStart,
@@ -581,6 +485,18 @@ export default function App() {
           songTitle={songTitle}
           onUpdateTitle={setSongTitle}
         />
+
+        {/* Count-in Overlay if active */}
+        {isCountingIn && (
+          <div className="p-4 bg-amber-500/20 border border-amber-500/40 rounded-xl flex items-center justify-between animate-pulse">
+            <span className="text-sm font-bold text-amber-300">
+              연습 시작 전 예비박 카운트다운 진행 중...
+            </span>
+            <div className="font-mono text-2xl font-black text-amber-300 px-4 py-1 bg-amber-950/80 rounded-lg border border-amber-500/40">
+              {countInBeat} / {timeSignature.beats}
+            </div>
+          </div>
+        )}
 
         {/* Essential: Audio Start & Pickup Beat (못갖춘마디) Alignment Panel */}
         <SongAudioSyncPanel
@@ -679,30 +595,31 @@ export default function App() {
               isMetronomeMuted={isMetronomeMuted}
               onToggleMetronomeMute={() => setIsMetronomeMuted(!isMetronomeMuted)}
               onTapDownbeat={handleTapDownbeat}
-              countdownMode={countdownMode}
-              onCountdownModeChange={setCountdownMode}
+              countIn={countIn}
+              onToggleCountIn={() => setCountIn(!countIn)}
             />
 
-            {/* Quick Practice Hotkey & Musician Guide */}
+            {/* Quick Sync & Practice Tips Guide */}
             <div className="p-4 bg-neutral-900/60 border border-neutral-800 rounded-xl text-xs space-y-2 text-neutral-400">
-              <div className="flex items-center justify-between text-neutral-200 font-semibold">
-                <div className="flex items-center gap-2">
-                  <HelpCircle className="w-4 h-4 text-amber-400" />
-                  <span>실전 악기 연습 편의 기능</span>
-                </div>
-                <span className="text-[11px] font-mono text-neutral-400">
-                  단축키: <kbd className="px-1.5 py-0.5 bg-neutral-800 rounded text-amber-300">Space</kbd> 재생/정지
-                </span>
+              <div className="flex items-center gap-2 text-neutral-200 font-semibold">
+                <HelpCircle className="w-4 h-4 text-amber-400" />
+                <span>예비박(못갖춘마디) 곡을 맞추는 핵심 가이드</span>
               </div>
-              <ul className="space-y-1.5 text-[11px] text-neutral-400 leading-relaxed pl-1">
+              <ol className="list-decimal list-inside space-y-1.5 text-[11px] text-neutral-400 leading-relaxed pl-1">
                 <li>
-                  <strong className="text-neutral-200">악기 파지 준비 카운트다운</strong>: 상단{' '}
-                  <span className="text-amber-300 font-medium">[준비 카운트: 1마디 또는 2마디]</span>를 설정하면 재생 버튼 클릭 후 메트로놈 소리와 함께 큰 화면으로 카운트다운(1-2-3-4)이 진행되어 악기를 편안하게 쥐고 자세를 잡을 수 있습니다.
+                  <strong className="text-neutral-200">1. 예비박 형태 설정</strong>: 마디 시작 전 몇 박자가 먼저 시작되는지{' '}
+                  <span className="text-amber-300 font-medium">[1박 예비박]</span>(가장 흔한 4박 진입) 또는{' '}
+                  <span className="text-amber-300 font-medium">[2박 예비박]</span>을 클릭하세요.
                 </li>
                 <li>
-                  <strong className="text-neutral-200">스페이스바(Space) 지원</strong>: 마우스를 만질 필요 없이 발 페달이나 손가락 하나로 스페이스바를 눌러 즉시 시작/정지할 수 있습니다.
+                  <strong className="text-neutral-200">2. 소리 시작점 스냅</strong>: 노래 첫 음이 들리는 순간{' '}
+                  <span className="text-amber-300 font-medium">[지금 위치를 시작점으로 지정]</span>을 누르면 영상 오프닝 묵음 동안 메트로놈이 울리지 않고 정밀하게 대기합니다.
                 </li>
-              </ul>
+                <li>
+                  <strong className="text-neutral-200">3. AI 곡 분석 활용</strong>: 상단의{' '}
+                  <span className="text-amber-300 font-medium">[곡 템포 & 예비박 AI 계산]</span> 버튼을 누르면 AI가 곡의 원곡 BPM과 예비박 구조를 자동 탐지해 한 번에 맞춰줍니다.
+                </li>
+              </ol>
             </div>
           </div>
         </div>
@@ -711,30 +628,11 @@ export default function App() {
       {/* 3. Footer */}
       <footer className="border-t border-neutral-800/80 bg-neutral-950 py-4 px-6 text-center text-xs text-neutral-500">
         <div className="flex items-center justify-center gap-3">
-          <span>SyncBeat · 유튜브 음원 동기화 & 준비 카운트다운 메트로놈</span>
+          <span>SyncBeat · 유튜브 음원 동기화 & 못갖춘마디 예비박 메트로놈</span>
           <span aria-hidden="true">·</span>
           <span>Web Audio API 기반 0-지연 정밀 합성 엔진</span>
         </div>
       </footer>
-
-      {/* Full-screen Auditory & Visual Countdown Overlay */}
-      {isCountingDown && (
-        <CountdownOverlay
-          currentCount={countdownCurrent}
-          totalCounts={countdownTotal}
-          isGo={isGo}
-          onCancel={handleCancelCountdown}
-          bpm={bpm}
-          effectiveBpm={bpm * speed}
-          countdownLabel={
-            countdownMode === '3_sec'
-              ? '3초 후 시작됩니다!'
-              : countdownMode === '2_bars'
-              ? '2마디(8박) 준비 카운트 중입니다!'
-              : '1마디(4박) 준비 카운트 중입니다!'
-          }
-        />
-      )}
 
       {/* Modals */}
       <AudioSettingsModal
